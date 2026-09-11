@@ -1,5 +1,6 @@
 import { readFileSync, readlinkSync } from "node:fs";
 import path from "node:path";
+import { FILE_RENAMES } from "./bundle.js";
 import { CONFIG_PATH, LOCK_PATH, stableJson } from "./config.js";
 import { listFiles, lstatOrNull, normalizedHash, readTextOrNull, toAbs } from "./fsutil.js";
 import { hookEnvironment } from "./git.js";
@@ -7,6 +8,7 @@ import { MCP_CONFIG_PATH, MCP_SERVER_NAME, MCP_SERVER_CONFIG, desiredMcpConfig }
 export const MARK_BEGIN = "# >>> ctxpack managed block (do not edit) >>>";
 export const MARK_END = "# <<< ctxpack managed block <<<";
 export const SHIM_MARKER = "# managed-by: ctxpack";
+export const CLAUDE_MD_PATH = "CLAUDE.md";
 const HOOK_MANAGER_FILES = ["lefthook.yml", ".lefthook.yml", "lefthook.yaml", ".lefthook.yaml", ".pre-commit-config.yaml"];
 export const primaryRoot = (skill) => `.agent/skills/${skill}`;
 export const claudeRoot = (skill) => `.claude/skills/${skill}`;
@@ -42,6 +44,8 @@ export function buildPlan(input) {
     else {
         actions.push({ kind: "skip", subject: "git integration", detail: "Not a git repository: .gitattributes and the pre-commit hook were skipped. Run \"ctxpack apply\" again after \"git init\"." });
     }
+    if (input.config.targets.includes("claude"))
+        planClaudeMd(input, actions);
     if (input.writeConfig)
         planTextFile(input.root, CONFIG_PATH, stableJson(input.config), actions);
     planMcpConfig(input, actions);
@@ -91,7 +95,7 @@ function syncTree(rootRel, skill, locked, input, actions, assumeEmpty) {
                 actions.push({ kind: "write", path: rel, content: f.content, executable: true, reason: "update", note: "restore executable bit" });
             }
         }
-        else if (locked[f.rel] === local) {
+        else if (local === lockedHash(locked, skill.name, f.rel)) {
             actions.push({ kind: "write", path: rel, content: f.content, executable: f.executable, reason: "update" });
         }
         else if (input.force) {
@@ -117,6 +121,13 @@ function syncTree(rootRel, skill, locked, input, actions, assumeEmpty) {
         else
             actions.push({ kind: "conflict", path: rel, code: "INTEGRITY_MISMATCH", detail: "Removed from the new skill version, but modified locally.", fix: "Delete or move it yourself, or use --force." });
     }
+}
+/** The locked hash for a file, falling back to the path an older lockfile used for it. */
+function lockedHash(locked, skillName, rel) {
+    if (locked[rel] !== undefined)
+        return locked[rel];
+    const legacy = FILE_RENAMES[skillName]?.[rel];
+    return legacy === undefined ? undefined : locked[legacy];
 }
 /** A directory is a managed copy when every file in it matches the lock or the bundle and nothing extra exists. */
 function isManagedCopy(abs, skill, locked) {
@@ -230,6 +241,32 @@ function planTextFile(root, rel, text, actions) {
     const existing = readTextOrNull(toAbs(root, rel));
     if (existing !== text)
         actions.push({ kind: "write", path: rel, content: Buffer.from(text), executable: false, reason: existing === null ? "create" : "update" });
+}
+/**
+ * Claude Code always reads CLAUDE.md at the project root, so the mandatory gate is announced
+ * there rather than relying on the agent choosing to load the skill first. Written as a managed
+ * block so a project's own CLAUDE.md content is preserved.
+ */
+function planClaudeMd(input, actions) {
+    const gated = input.skills.filter((s) => s.files.some((f) => f.rel === "workflows/context-gate.md"));
+    if (gated.length === 0)
+        return;
+    const lines = [
+        "## Before writing code",
+        "",
+        "Run the Context Gate first for any non-trivial request: a new project, an empty repo, or a new",
+        "feature, screen, page, module, API, CRUD list, management screen, form, dashboard or import/export.",
+        "The gate is one round of questions, not a pause. Stay read-only until the answers arrive, then",
+        "state the assumptions you are making and start implementing in the same turn - do not ask the",
+        "user to confirm a summary first. Only HIGH_RISK work (auth, secrets, data loss, schema",
+        "migration, contract break) waits for an explicit go-ahead.",
+        "",
+        ...gated.flatMap((s) => [
+            `- Gate procedure: \`${primaryRoot(s.name)}/workflows/context-gate.md\``,
+            `- Pipeline and rules: \`${primaryRoot(s.name)}/SKILL.md\``,
+        ]),
+    ];
+    planBlock(input.root, CLAUDE_MD_PATH, lines, false, actions);
 }
 /** Keep hook scripts LF on every checkout: a CRLF shell script fails under sh. */
 function planGitattributes(input, mode, actions) {

@@ -9,7 +9,29 @@ Goal: reach 95–100% understanding of the requested behavior with the fewest po
 3. **Pick relevant categories** from the list below. Most tasks touch only 2 to 4.
 4. **List the unknowns** that would change the code. Drop anything that would not.
 5. **Classify**: CLEAR / PARTIALLY_CLEAR / AMBIGUOUS / HIGH_RISK (definitions in `SKILL.md`).
-6. **Ask or proceed.** When asking, use the format below and wait for the answer. When proceeding, record any low-impact assumptions in the plan.
+6. **Ask or proceed.** When proceeding, record any low-impact assumptions in the plan. When asking, use the format below, wait for the answer, then go straight into the work - see below.
+
+## One round, then build
+
+The gate buys understanding, not approval. It opens for at most one round of questions and closes as
+soon as the answers arrive; from that moment you are no longer read-only.
+
+On receiving the answers, in the same turn:
+
+1. Write the requirement model and the CHANGE-SCOPE block, folding the answers in.
+2. State every remaining assumption in one short list, as decisions you have made - not as questions.
+3. Start implementing. Announce the plan and the first file you create in the same message.
+
+Do not send a summary for the user to confirm, do not ask "shall I start?", and do not re-ask
+anything already answered. If an answer is partial or names something you did not offer, take the
+recommended default for the rest, record it as an assumption and keep building. The user corrects a
+wrong assumption by reading what you wrote and interrupting; that is cheaper than a second round
+trip. A second round of questions is justified only when the answers reveal a genuinely new
+AMBIGUOUS or HIGH_RISK decision that the first round could not have known about.
+
+**The one exception is HIGH_RISK** (auth, RBAC, secrets, data loss, schema migration, API or MCP
+contract break, memory lifecycle, integrity). There, name each dangerous assumption and wait for an
+explicit go-ahead before touching a file. Everything not HIGH_RISK proceeds.
 
 Categories: functional behavior, input, output, validation, error handling, search, filtering, sorting, pagination, authorization, authentication, persistence, transactions, concurrency, performance, caching, external APIs, side effects, events, notifications, logging, observability, backward compatibility, migration, security, testing, UI/API contract, configuration, environment, deployment.
 
@@ -90,4 +112,6 @@ Bad: "How should search work?"
 - Asking what the code already answers.
 - Open-ended questions without options.
 - Asking, then implementing before the answer arrives.
+- Asking for confirmation of a summary after the answers are already in.
+- A second round of questions about something the first round settled.
 - Proceeding on a HIGH_RISK assumption without explicit confirmation.

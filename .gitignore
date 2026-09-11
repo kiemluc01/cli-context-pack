@@ -1,7 +1,6 @@
-CLAUDE.md
 .github/
 .cursor/
-.release/
+releases/
 .claude/
 .github/instructions/session-memory.instructions.md
 .cursor/rules

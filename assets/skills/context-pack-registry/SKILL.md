@@ -1,6 +1,6 @@
 ---
 name: context-pack-registry
-description: Implementation control system for building and maintaining Context Pack Registry (formerly Agent Registry), the shared engineering knowledge and control plane for AI coding agents (ctxpack CLI, shared MCP server, PostgreSQL memory, Git-governed skills/context/policies/hooks, resolvers, capture, integrity, RBAC). Use this skill for ANY change in the Context Pack Registry codebase, including features, bug fixes, tests, hooks, schema changes, MCP tools (memory_search, context_get, skill_resolve and others), ctxpack commands, project detection, memory lifecycle, context or skill resolution, governance, and releases. Use it even when the user does not say "Context Pack Registry" or "Agent Registry" and even when the change looks small.
+description: Engineering control system for any non-trivial coding work in a repository that installs this pack. MANDATORY FIRST STEP — run the Context Gate in workflows/context-gate.md before writing any code, whenever the user asks to start a new project, init or scaffold a repo, work in an empty repo, or build any new feature, screen, page, module, API, CRUD list, management screen, form, detail view, dashboard, report, or import/export. This applies to short requests that name no stack, such as build an employee management web app, create a user list with CRUD, or make an inventory project. Gate open means read-only until the user answers one round of questions; then state your assumptions and implement in the same turn, without asking for confirmation of a summary. Also use this skill for ANY change to the Context Pack Registry codebase itself (ctxpack CLI, shared MCP server, PostgreSQL memory, Git-governed skills/context/policies/hooks, resolvers, capture, integrity, RBAC, releases), even when the user does not name it and even when the change looks small.
 ---
 
 # Context Pack Registry: Implementation Control
@@ -47,6 +47,8 @@ Before writing code, classify the request:
 | PARTIALLY_CLEAR | Missing details would change the code | Ask targeted questions |
 | AMBIGUOUS | Several valid implementations exist | Ask for a choice |
 | HIGH_RISK | Auth, RBAC, secrets, data loss, schema migration, API or MCP contract break, memory lifecycle, integrity | Get explicit confirmation of every dangerous assumption |
+
+**The gate is one round, not a checkpoint.** Read-only ends the moment the answers arrive. Then write the decisions and any low-impact assumptions into the plan and start implementing in the same turn. Do not send the user a summary to approve, and do not re-ask what they just answered; if an answer turns out to be incomplete, choose the recommended default, record it as an assumption and keep going. The single exception is HIGH_RISK: there, every dangerous assumption needs an explicit go-ahead before any file changes.
 
 Ask only questions whose answers change the code. Give concrete options with a recommended default. Put all questions in one message, most important first, and keep it to about five for a typical feature. The question bank per task type is in `workflows/context-gate.md`.
 

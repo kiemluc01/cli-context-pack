@@ -32,6 +32,14 @@ export function packageVersion() {
  * managed files are removed (never files the user modified or does not own).
  */
 export const SKILL_RENAMES = { "agent-registry": "context-pack-registry" };
+/**
+ * Managed files renamed between releases, per skill (current path -> path recorded by older
+ * lockfiles). 0.3.0 installed the asset map as the entry point, so its lockfile records
+ * "CLAUDE.md" where 0.3.1 records "SKILL.md". Without this map an untouched 0.3.0 install
+ * reports a false INTEGRITY_MISMATCH on upgrade and tells the user to discard a change they
+ * never made.
+ */
+export const FILE_RENAMES = { "context-pack-registry": { "SKILL.md": "CLAUDE.md" } };
 /** Deterministic rule: files under hooks/ with no extension or .sh are executable. */
 export function isExecutableAsset(rel) {
     if (!rel.startsWith("hooks/"))
