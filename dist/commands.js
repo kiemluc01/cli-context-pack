@@ -1,0 +1,172 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { loadSkill, packageVersion, SKILL_RENAMES } from "./bundle.js";
+import { CONFIG_PATH, defaultConfig, LINK_MODES, migrateConfig, readConfig, readLock, requireConfig } from "./config.js";
+import { CtxpackError, EXIT } from "./errors.js";
+import { executePlan } from "./executor.js";
+import { git, locateProject } from "./git.js";
+import { describeAction, planSummary, renderPlan, renderSummaryLine } from "./output.js";
+import { buildPlan } from "./planner.js";
+function makePlan(ctx, loc, config, writeConfig, renamed = [], force = ctx.force) {
+    return buildPlan({
+        root: loc.root, isGit: loc.isGit, config, lock: readLock(loc.root),
+        skills: config.skills.map(loadSkill), force, platform: ctx.platform, writeConfig: writeConfig || renamed.length > 0, renamed,
+    });
+}
+/** Required config with renamed skill ids migrated in memory (persisted only by apply/init). */
+function loadConfig(root) {
+    return migrateConfig(requireConfig(root), SKILL_RENAMES);
+}
+function emitPlan(ctx, command, plan, extra = {}) {
+    if (ctx.json) {
+        ctx.io.out(JSON.stringify({ command, root: plan.root, version: packageVersion(), linkMode: plan.linkMode,
+            summary: planSummary(plan), actions: plan.actions.map(describeAction), ...extra }, null, 2));
+        return;
+    }
+    ctx.io.out(`ctxpack ${command}: ${plan.root}`);
+    renderPlan(plan, ctx.io, ctx.verbose);
+    ctx.io.out(renderSummaryLine(plan));
+}
+function applyPlan(ctx, command, plan) {
+    emitPlan(ctx, command, plan, { applied: plan.conflicts === 0 });
+    executePlan(plan); // throws CONFLICT when blocked
+    if (!ctx.json)
+        ctx.io.out(plan.changes === 0 ? "Already up to date." : `Applied ${plan.changes} change(s).`);
+    return EXIT.OK;
+}
+export function init(ctx, opts) {
+    const loc = locateProject(ctx.cwd);
+    const existing = readConfig(loc.root);
+    const { config: migrated, renamed } = existing ? migrateConfig(existing, SKILL_RENAMES) : { config: defaultConfig(), renamed: [] };
+    const config = { ...migrated };
+    if (opts.linkMode !== undefined) {
+        if (!LINK_MODES.includes(opts.linkMode)) {
+            throw new CtxpackError("USAGE_ERROR", `Invalid --link-mode "${opts.linkMode}"`, `Expected one of: ${LINK_MODES.join(", ")}.`, "Example: ctxpack init --link-mode copy", EXIT.USAGE);
+        }
+        config.linkMode = opts.linkMode;
+    }
+    if (opts.skipHooks)
+        config.hooks = { preCommit: false };
+    const plan = makePlan(ctx, loc, config, true, renamed);
+    if (opts.dryRun) {
+        emitPlan(ctx, "init --dry-run", plan);
+        return EXIT.OK;
+    }
+    const code = applyPlan(ctx, "init", plan);
+    if (!ctx.json && plan.changes > 0) {
+        const paths = [".agent", ...(config.targets.includes("claude") ? [".claude"] : []), ".mcp.json", ...(loc.isGit ? [".gitattributes"] : [])];
+        if (plan.actions.some((a) => "path" in a && a.path.startsWith(".husky/")))
+            paths.push(".husky");
+        ctx.io.out("");
+        ctx.io.out("Next steps:");
+        ctx.io.out(`  git add ${paths.join(" ")} && git commit -m "chore: add context-pack-registry skill"`);
+        ctx.io.out('  Teammates run "ctxpack apply" after cloning (installs their local git hook).');
+    }
+    return code;
+}
+export function apply(ctx) {
+    const loc = locateProject(ctx.cwd);
+    const { config, renamed } = loadConfig(loc.root);
+    return applyPlan(ctx, "apply", makePlan(ctx, loc, config, false, renamed));
+}
+export function plan(ctx, exitCode) {
+    const loc = locateProject(ctx.cwd);
+    const { config, renamed } = loadConfig(loc.root);
+    const p = makePlan(ctx, loc, config, false, renamed);
+    emitPlan(ctx, "plan", p);
+    return exitCode && (p.changes > 0 || p.conflicts > 0) ? EXIT.DRIFT : EXIT.OK;
+}
+export function status(ctx) {
+    const loc = locateProject(ctx.cwd);
+    const { config, renamed } = loadConfig(loc.root);
+    const lock = readLock(loc.root);
+    const p = makePlan(ctx, loc, config, false, renamed, false);
+    const modified = p.actions.filter((a) => a.kind === "conflict" && a.code === "INTEGRITY_MISMATCH").map((a) => ("path" in a ? a.path : ""));
+    const skills = config.skills.map((name) => ({ name, installed: lock.skills[name]?.version ?? null, bundled: packageVersion() }));
+    const inSync = p.changes === 0 && p.conflicts === 0;
+    if (ctx.json) {
+        ctx.io.out(JSON.stringify({ command: "status", root: loc.root, inSync, skills, renamed, linkMode: p.linkMode, pendingChanges: p.changes, conflicts: p.conflicts, modified }, null, 2));
+    }
+    else {
+        ctx.io.out(`ctxpack status: ${loc.root}`);
+        for (const s of skills)
+            ctx.io.out(`  skill ${s.name}: installed ${s.installed ?? "none"}, bundled ${s.bundled}`);
+        for (const r of renamed)
+            ctx.io.out(`  rename pending: ${r.from} -> ${r.to} (installed ${lock.skills[r.from]?.version ?? "unknown"}); run "ctxpack apply"`);
+        ctx.io.out(`  link mode: ${p.linkMode}${loc.isGit ? "" : "   (not a git repository: hooks inactive)"}`);
+        for (const m of modified)
+            ctx.io.out(`  ✗ modified: ${m} [INTEGRITY_MISMATCH]`);
+        ctx.io.out(inSync ? "In sync." : `Drift: ${p.changes} pending change(s), ${p.conflicts} conflict(s). Run "ctxpack plan" for details.`);
+    }
+    return inSync ? EXIT.OK : EXIT.DRIFT;
+}
+export function doctor(ctx) {
+    const checks = [];
+    const add = (name, status, detail, fix) => { checks.push({ name, status, detail, ...(fix ? { fix } : {}) }); };
+    const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+    add("node", major > 18 || (major === 18 && minor >= 17) ? "ok" : "fail", `Node.js ${process.versions.node}`, "Install Node.js 18.17 or newer.");
+    const gitVersion = git(ctx.cwd, ["--version"]);
+    add("git", gitVersion ? "ok" : "warn", gitVersion ?? "git not found on PATH", "Install git; hooks and .gitattributes need it.");
+    const loc = locateProject(ctx.cwd);
+    add("repository", loc.isGit ? "ok" : "warn", loc.isGit ? `git repository at ${loc.root}` : `${loc.root} is not a git repository`, 'Run "git init" to enable the pre-commit hook.');
+    const sh = spawnSync("sh", ["-c", "exit 0"], { stdio: "ignore" });
+    add("sh", sh.status === 0 ? "ok" : "warn", sh.status === 0 ? "POSIX sh available" : "sh not found on PATH", ctx.platform === "win32" ? "Git for Windows runs hooks with its bundled sh; add its usr/bin to PATH to run hooks manually." : "Install a POSIX shell.");
+    let symlinkOk = false;
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "ctxpack-doctor-"));
+    try {
+        symlinkSync(tmp, path.join(tmp, "link"), "dir");
+        symlinkOk = true;
+    }
+    catch { /* reported below */ }
+    finally {
+        rmSync(tmp, { recursive: true, force: true });
+    }
+    add("symlinks", symlinkOk ? "ok" : "warn", symlinkOk ? "directory symlinks supported" : "cannot create directory symlinks", 'Use "linkMode": "copy" (the default on Windows via "auto").');
+    let config = null;
+    let renamed = [];
+    try {
+        const raw = readConfig(loc.root);
+        if (raw)
+            ({ config, renamed } = migrateConfig(raw, SKILL_RENAMES));
+        add("config", config ? "ok" : "warn", config ? `${CONFIG_PATH} valid` : "not initialized", 'Run "ctxpack init".');
+    }
+    catch (e) {
+        const err = e;
+        add("config", "fail", `${err.message}: ${err.reason}`, err.fix);
+    }
+    if (config) {
+        try {
+            const p = makePlan(ctx, loc, config, false, renamed, false);
+            for (const r of renamed)
+                add("rename", "warn", `skill "${r.from}" was renamed to "${r.to}"`, 'Run "ctxpack apply" to migrate.');
+            if (p.conflicts > 0)
+                add("install", "fail", `${p.conflicts} conflict(s), including local modifications of managed files`, 'Run "ctxpack plan" for details.');
+            else if (p.changes > 0)
+                add("install", "warn", `${p.changes} pending change(s)`, 'Run "ctxpack apply".');
+            else
+                add("install", "ok", "installed files match the lockfile and the bundled version");
+            for (const m of p.actions.filter((a) => a.kind === "manual"))
+                add("hook", "warn", "detail" in m ? m.detail : "", "fix" in m ? m.fix : undefined);
+        }
+        catch (e) {
+            const err = e;
+            add("install", "fail", `${err.message}: ${err.reason}`, err.fix);
+        }
+    }
+    const failed = checks.some((c) => c.status === "fail");
+    if (ctx.json) {
+        ctx.io.out(JSON.stringify({ command: "doctor", root: loc.root, ok: !failed, checks }, null, 2));
+    }
+    else {
+        const icon = { ok: "✓", warn: "!", fail: "✗" };
+        ctx.io.out(`ctxpack doctor: ${loc.root}`);
+        for (const c of checks) {
+            ctx.io.out(`  ${icon[c.status]} ${c.name.padEnd(11)} ${c.detail}`);
+            if (c.status !== "ok" && c.fix)
+                ctx.io.out(`      FIX: ${c.fix}`);
+        }
+    }
+    return failed ? EXIT.FAILED : EXIT.OK;
+}

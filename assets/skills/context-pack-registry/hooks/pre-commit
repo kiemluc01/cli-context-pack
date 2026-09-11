@@ -1,0 +1,115 @@
+#!/bin/sh
+# Context Pack Registry pre-commit quality gate.
+#
+#   staged files → unit test presence → secret detection → formatter
+#                → lint / typecheck (where configured) → PASS / BLOCK
+#
+# This is the fast local guardrail; CI is the authoritative gate and runs the
+# full test suite, coverage and a full secret scan.
+#
+# Install (pick one, see README.md):
+#   git config core.hooksPath .agent/skills/context-pack-registry/hooks
+#   or call this script from husky / lefthook / pre-commit framework.
+#
+# Explicit, visible opt-outs (printed as SKIP):
+#   AGENT_HOOKS_SKIP=format,lint     skip formatter and/or lint/typecheck
+#   AGENT_SKIP_TYPECHECK=1           skip only the project-wide typecheck
+# Unit-test and secret checks cannot be skipped this way. They have their own
+# reviewed allowlists (.agent/test-exemptions, .agent/secret-allowlist).
+set -u
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+cd "$ROOT" || exit 1
+
+# Locate helper scripts: next to this file (core.hooksPath install) or in the
+# skill directory (when copied into .git/hooks or called from a hook manager).
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+if [ -f "$HERE/check-tests" ]; then HOOK_DIR=$HERE
+else HOOK_DIR=${AGENT_HOOKS_DIR:-$ROOT/.agent/skills/context-pack-registry/hooks}; fi
+if [ ! -f "$HOOK_DIR/check-tests" ]; then
+  echo "[FAIL] Context Pack Registry hooks not found in $HOOK_DIR (set AGENT_HOOKS_DIR)"; exit 1
+fi
+
+STAGED=$(git -c core.quotepath=off diff --cached --name-only --diff-filter=ACMR)
+[ -n "$STAGED" ] || exit 0
+
+SKIP=",${AGENT_HOOKS_SKIP:-},"
+summary=""; blocked=0
+
+record() { # record "<check name>" <exit code>
+  case "$2" in
+    0) st=PASS ;; 3) st="SKIP (nothing to check)" ;; 99) st="SKIP (AGENT_HOOKS_SKIP)" ;;
+    98) st="SKIP (not configured)" ;; *) st=FAIL; blocked=1 ;;
+  esac
+  summary="$summary
+$(printf '  %-22s %s' "$1" "$st")"
+}
+
+run_check() { # run_check "<name>" <script>
+  # Run through sh so a lost executable bit (Windows, copies, core.fileMode=false)
+  # cannot break the gate.
+  sh "$HOOK_DIR/$2"; rc=$?
+  record "$1" "$rc"
+}
+
+# ------------------------------------------------------------ lint/typecheck
+lint_typecheck() {
+  have() { command -v "$1" >/dev/null 2>&1; }
+  ran=0 rc=0
+  jsfiles=$(printf '%s\n' "$STAGED" | grep -E '\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$' | grep -v '\.d\.ts$' || true)
+  pyfiles=$(printf '%s\n' "$STAGED" | grep -E '\.py$' || true)
+  gofiles=$(printf '%s\n' "$STAGED" | grep -E '\.go$' || true)
+
+  if [ -n "$jsfiles" ] && [ -x node_modules/.bin/eslint ] && \
+     { ls eslint.config.* .eslintrc* >/dev/null 2>&1 || grep -qs '"eslintConfig"' package.json; }; then
+    ran=1; echo "  lint:   eslint (staged files)"
+    printf '%s\n' "$jsfiles" | tr '\n' '\0' | xargs -0 node_modules/.bin/eslint -- || rc=1
+  fi
+  if [ -n "$jsfiles" ] && [ -f tsconfig.json ] && [ "${AGENT_SKIP_TYPECHECK:-0}" != 1 ]; then
+    if grep -qs '"typecheck"[[:space:]]*:' package.json; then
+      ran=1; echo "  types:  npm run typecheck"; npm run -s typecheck || rc=1
+    elif [ -x node_modules/.bin/tsc ]; then
+      ran=1; echo "  types:  tsc --noEmit"; node_modules/.bin/tsc --noEmit -p tsconfig.json || rc=1
+    fi
+  fi
+  if [ -n "$pyfiles" ] && have ruff && { grep -qs '^\[tool\.ruff' pyproject.toml || [ -f ruff.toml ] || [ -f .ruff.toml ]; }; then
+    ran=1; echo "  lint:   ruff check (staged files)"
+    printf '%s\n' "$pyfiles" | tr '\n' '\0' | xargs -0 ruff check -- || rc=1
+  fi
+  if [ -n "$pyfiles" ] && have mypy && [ "${AGENT_SKIP_TYPECHECK:-0}" != 1 ] && \
+     { grep -qs '^\[tool\.mypy' pyproject.toml || [ -f mypy.ini ]; }; then
+    ran=1; echo "  types:  mypy (staged files)"
+    printf '%s\n' "$pyfiles" | tr '\n' '\0' | xargs -0 mypy -- || rc=1
+  fi
+  if [ -n "$gofiles" ] && have go; then
+    ran=1; echo "  lint:   go vet (changed packages)"
+    pkgs=$(printf '%s\n' "$gofiles" | xargs -n1 dirname | sort -u | sed 's#^#./#')
+    # shellcheck disable=SC2086
+    go vet $pkgs || rc=1
+  fi
+  [ "$ran" -eq 1 ] || return 98
+  if [ "$rc" -ne 0 ]; then
+    echo "[FAIL] Lint / typecheck: see errors above"
+    echo "  FIX:    Fix the reported problems, re-stage, and commit again."
+    return 1
+  fi
+  echo "[PASS] Lint / typecheck"
+  return 0
+}
+
+echo "Context Pack Registry pre-commit"
+run_check "Unit test presence" check-tests
+run_check "Secret detection"   check-secrets
+case "$SKIP" in *,format,*) record "Formatter" 99 ;; *) run_check "Formatter" format ;; esac
+case "$SKIP" in *,lint,*)   record "Lint / typecheck" 99 ;; *) lint_typecheck; record "Lint / typecheck" $? ;; esac
+
+echo ""
+printf '  %-22s %s' "CHECK" "STATUS"
+printf '%s\n' "$summary"
+echo ""
+if [ "$blocked" -ne 0 ]; then
+  echo "Commit blocked. Fix the failures above, then commit again."
+  exit 1
+fi
+echo "All checks passed."
+exit 0

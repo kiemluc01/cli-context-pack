@@ -1,0 +1,33 @@
+{
+  "name": "@aristha/ctxpack",
+  "version": "0.3.0",
+  "description": "Install and maintain the Context Pack Registry skill and its quality-gate hooks in any project.",
+  "type": "module",
+  "bin": {
+    "ctxpack": "dist/bin.js"
+  },
+  "files": [
+    "dist/",
+    "assets/",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node dist/bin.js --version",
+    "pack:local": "node scripts/pack-local.mjs",
+    "prepack": "npm run build"
+  },
+  "keywords": ["context-pack-registry", "claude-code", "skills", "pre-commit", "cli"],
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0"
+  }
+}

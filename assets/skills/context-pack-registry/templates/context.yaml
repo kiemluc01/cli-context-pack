@@ -1,0 +1,20 @@
+# Canonical context entry (governed artifact; lives in Git, changed only via reviewed PR)
+# Path convention (adapt to repo): context/<scope>/<scopeRef>/<id>.yaml
+
+id: prompt-cache-backend       # unique within its scope; narrower scopes override by id
+scope: PROJECT                 # GLOBAL | TEAM | PROFILE | PROJECT | PERSONAL | SESSION
+scopeRef: context-pack-registry       # team/profile/project identifier for the scope
+status: active                 # active | deprecated  (never delete; deprecate)
+module: prompt-cache
+tags: [cache, redis]
+appliesTo:                     # optional deterministic filter against ProjectModel / task
+  modules: [prompt-cache]
+
+statements:                    # short declarative facts, current truth only
+  - "Prompt cache uses Redis."
+  - "Cache keys are namespaced by project id."
+
+sourceMemoryIds: []            # memories this entry was promoted from
+supersedes: null               # id of the entry this replaces
+version: 1.0.0
+# checksum is computed into the registry manifest; do not hand-edit here

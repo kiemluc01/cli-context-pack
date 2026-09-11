@@ -1,0 +1,102 @@
+import { parseArgs } from "node:util";
+import { packageVersion } from "./bundle.js";
+import { apply, doctor, init, plan, status } from "./commands.js";
+import { CtxpackError, EXIT } from "./errors.js";
+const HELP = `ctxpack: install and maintain the Context Pack Registry skill in any project
+
+Usage: ctxpack <command> [options]
+
+Commands:
+  init      Create .agent/ctxpack.json and install everything (idempotent)
+  plan      Preview what "apply" would change (read-only)
+  apply     Converge the project to .agent/ctxpack.json and the bundled skill
+  status    Summarize installed version and drift (read-only)
+  doctor    Check the environment and the installation (read-only)
+
+Options:
+  --cwd <dir>          Project directory (default: current directory)
+  --json               Machine-readable output
+  --verbose            List every file instead of grouping
+  --force              Overwrite local modifications of managed files
+  --dry-run            init only: show the plan without writing
+  --link-mode <mode>   init only: auto | symlink | copy (how .claude/skills is populated)
+  --skip-hooks         init only: do not install the pre-commit hook
+  --exit-code          plan only: exit 3 when changes or conflicts exist
+  -h, --help           Show help
+  -v, --version        Show version
+
+Exit codes: 0 success, 1 failed, 2 usage/configuration error, 3 drift detected`;
+const COMMAND_OPTIONS = {
+    init: ["force", "dry-run", "link-mode", "skip-hooks"],
+    plan: ["force", "exit-code"],
+    apply: ["force"],
+    status: [],
+    doctor: [],
+};
+const GLOBAL_OPTIONS = ["cwd", "json", "verbose", "help", "version"];
+const usage = (message) => new CtxpackError("USAGE_ERROR", message, "The command line could not be understood.", 'Run "ctxpack --help".', EXIT.USAGE);
+export function main(argv, deps = {}) {
+    const io = deps.io ?? { out: (l) => process.stdout.write(l + "\n"), err: (l) => process.stderr.write(l + "\n") };
+    let json = argv.includes("--json");
+    try {
+        let parsed;
+        try {
+            parsed = parseArgs({
+                args: [...argv],
+                allowPositionals: true,
+                strict: true,
+                options: {
+                    cwd: { type: "string" }, json: { type: "boolean" }, verbose: { type: "boolean" },
+                    force: { type: "boolean" }, "dry-run": { type: "boolean" }, "link-mode": { type: "string" },
+                    "skip-hooks": { type: "boolean" }, "exit-code": { type: "boolean" },
+                    help: { type: "boolean", short: "h" }, version: { type: "boolean", short: "v" },
+                },
+            });
+        }
+        catch (e) {
+            throw usage(e.message);
+        }
+        const { values, positionals } = parsed;
+        json = values.json === true;
+        if (values.version) {
+            io.out(packageVersion());
+            return EXIT.OK;
+        }
+        const [command, ...rest] = positionals;
+        if (values.help || command === undefined || command === "help") {
+            io.out(HELP);
+            return command === undefined && !values.help ? EXIT.USAGE : EXIT.OK;
+        }
+        const allowed = COMMAND_OPTIONS[command];
+        if (!allowed)
+            throw usage(`Unknown command "${command}"`);
+        if (rest.length > 0)
+            throw usage(`Unexpected argument "${rest[0]}"`);
+        for (const key of Object.keys(values)) {
+            if (!GLOBAL_OPTIONS.includes(key) && !allowed.includes(key))
+                throw usage(`Option --${key} is not valid for "${command}"`);
+        }
+        const ctx = {
+            cwd: values.cwd ?? deps.cwd ?? process.cwd(), io, json,
+            verbose: values.verbose === true, force: values.force === true, platform: deps.platform ?? process.platform,
+        };
+        switch (command) {
+            case "init": return init(ctx, { linkMode: values["link-mode"], skipHooks: values["skip-hooks"] === true, dryRun: values["dry-run"] === true });
+            case "plan": return plan(ctx, values["exit-code"] === true);
+            case "apply": return apply(ctx);
+            case "status": return status(ctx);
+            default: return doctor(ctx);
+        }
+    }
+    catch (e) {
+        if (e instanceof CtxpackError) {
+            if (json)
+                io.out(JSON.stringify({ error: { code: e.code, message: e.message, reason: e.reason, fix: e.fix } }, null, 2));
+            else
+                io.err(`error [${e.code}]: ${e.message}\n  why: ${e.reason}\n  fix: ${e.fix}`);
+            return e.exitCode;
+        }
+        io.err(`error: ${e.message}`);
+        return EXIT.FAILED;
+    }
+}

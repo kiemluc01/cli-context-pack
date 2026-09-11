@@ -1,0 +1,106 @@
+import { CtxpackError } from "./errors.js";
+import { readTextOrNull, toAbs } from "./fsutil.js";
+export const CONFIG_PATH = ".agent/ctxpack.json";
+export const LOCK_PATH = ".agent/ctxpack.lock.json";
+export const TARGETS = ["claude"];
+export const LINK_MODES = ["auto", "symlink", "copy"];
+export function defaultConfig() {
+    return { schemaVersion: 1, skills: ["context-pack-registry"], targets: ["claude"], linkMode: "auto", hooks: { preCommit: true } };
+}
+/** JSON with recursively sorted keys and a trailing newline: byte-identical across runs. */
+export function stableJson(value) {
+    const sort = (v) => {
+        if (Array.isArray(v))
+            return v.map(sort);
+        if (v && typeof v === "object") {
+            return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sort(v[k])]));
+        }
+        return v;
+    };
+    return JSON.stringify(sort(value), null, 2) + "\n";
+}
+const invalid = (field, why) => new CtxpackError("INVALID_CONFIGURATION", `${CONFIG_PATH}: invalid "${field}"`, why, `Fix "${field}" in ${CONFIG_PATH}, or delete the file and run "ctxpack init".`, 2);
+function expectKeys(obj, allowed, where) {
+    for (const key of Object.keys(obj)) {
+        if (!allowed.includes(key))
+            throw invalid(where ? `${where}.${key}` : key, "Unknown field.");
+    }
+    for (const key of allowed) {
+        if (!(key in obj))
+            throw invalid(where ? `${where}.${key}` : key, "Required field is missing.");
+    }
+}
+export function parseConfig(text) {
+    let raw;
+    try {
+        raw = JSON.parse(text);
+    }
+    catch (e) {
+        throw invalid("(file)", `Not valid JSON: ${e.message}`);
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+        throw invalid("(file)", "Expected a JSON object.");
+    const c = raw;
+    expectKeys(c, ["schemaVersion", "skills", "targets", "linkMode", "hooks"], "");
+    if (c.schemaVersion !== 1)
+        throw invalid("schemaVersion", "Only schemaVersion 1 is supported.");
+    if (!Array.isArray(c.skills) || c.skills.length === 0 || !c.skills.every((s) => typeof s === "string" && /^[a-z0-9-]+$/.test(s))) {
+        throw invalid("skills", "Expected a non-empty array of skill names (lowercase letters, digits, dashes).");
+    }
+    if (!Array.isArray(c.targets) || !c.targets.every((t) => TARGETS.includes(t))) {
+        throw invalid("targets", `Expected an array containing only: ${TARGETS.join(", ")}.`);
+    }
+    if (!LINK_MODES.includes(c.linkMode)) {
+        throw invalid("linkMode", `Expected one of: ${LINK_MODES.join(", ")}.`);
+    }
+    const h = c.hooks;
+    if (!h || typeof h !== "object" || Array.isArray(h))
+        throw invalid("hooks", "Expected an object.");
+    expectKeys(h, ["preCommit"], "hooks");
+    if (typeof h.preCommit !== "boolean")
+        throw invalid("hooks.preCommit", "Expected true or false.");
+    return {
+        schemaVersion: 1,
+        skills: [...new Set(c.skills)].sort(),
+        targets: [...new Set(c.targets)].sort(),
+        linkMode: c.linkMode,
+        hooks: { preCommit: h.preCommit },
+    };
+}
+/** Replace renamed skill ids; the caller persists the result through the normal plan/apply path. */
+export function migrateConfig(config, renames) {
+    const renamed = [];
+    const skills = config.skills.map((s) => {
+        const to = renames[s];
+        if (to === undefined)
+            return s;
+        renamed.push({ from: s, to });
+        return to;
+    });
+    return { config: { ...config, skills: [...new Set(skills)].sort() }, renamed };
+}
+export function readConfig(root) {
+    const text = readTextOrNull(toAbs(root, CONFIG_PATH));
+    return text === null ? null : parseConfig(text);
+}
+export function requireConfig(root) {
+    const config = readConfig(root);
+    if (!config) {
+        throw new CtxpackError("PROJECT_NOT_FOUND", `No ${CONFIG_PATH} in ${root}`, "This project has not been initialized with ctxpack.", 'Run "ctxpack init" in the project root.', 2);
+    }
+    return config;
+}
+export function readLock(root) {
+    const text = readTextOrNull(toAbs(root, LOCK_PATH));
+    if (text === null)
+        return { schemaVersion: 1, skills: {} };
+    try {
+        const lock = JSON.parse(text);
+        if (lock.schemaVersion !== 1 || typeof lock.skills !== "object" || lock.skills === null)
+            throw new Error("bad shape");
+        return lock;
+    }
+    catch {
+        throw new CtxpackError("INVALID_CONFIGURATION", `${LOCK_PATH} is unreadable`, "The lockfile is not valid JSON or has an unexpected shape (it may have been hand-edited or merge-conflicted).", `Restore it from git, or delete it and run "ctxpack apply --force" to reinstall from the bundled version.`, 2);
+    }
+}

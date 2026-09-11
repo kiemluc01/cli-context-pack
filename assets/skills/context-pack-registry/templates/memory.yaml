@@ -1,0 +1,44 @@
+# Memory template (dynamic knowledge; stored in PostgreSQL via MCP, NOT in Git)
+# This file documents the shape accepted by memory_register / ctxpack memory register.
+# New memories always start as CANDIDATE (or OBSERVED from automated capture).
+
+id: null                       # assigned by server
+type: feature                  # feature | decision | observation | known_issue | gotcha | change
+title: "Prompt cache uses Redis"
+body: >
+  Short, factual description of what was learned. No secrets, no full diffs.
+project: context-pack-registry
+module: prompt-cache
+lifecycle: CANDIDATE           # OBSERVED | CANDIDATE | VERIFIED | CANONICAL | DEPRECATED (server-controlled)
+freshness: FRESH               # FRESH | POTENTIALLY_STALE (server-controlled)
+supersedes: null               # id of the memory this one corrects
+canonicalRef: null             # path@commit of the Git context entry, set only on promotion to CANONICAL
+
+links:
+  files: [packages/core/src/cache/prompt-cache.ts]
+  modules: [prompt-cache]
+  dependencies: [ioredis]
+
+provenance:
+  repository: git@example.com:org/context-pack-registry.git
+  author: dev@example.com
+  commit: 0000000000000000000000000000000000000000
+  pr: 123
+  changedFiles: [packages/core/src/cache/prompt-cache.ts]
+  evidence:
+    - "Diff adds Redis client to prompt cache (commit 0000000)"
+  createdAt: 2026-01-01T00:00:00Z
+  # Required whenever AI produced any field above:
+  generatedAt: null
+  model: null
+  confidence: null             # 0.0-1.0, informational only, never changes lifecycle
+  verificationState: unverified
+
+# --- Only for type: decision (all four required) ---
+decision: null                 # e.g. "Use Redis for prompt cache"
+reason: null                   # WHY; a decision without a reason is rejected
+alternatives: []               # e.g. ["in-process LRU", "PostgreSQL table"]
+tradeoffs: null                # e.g. "Extra infrastructure; shared across instances"
+source:
+  pr: null
+  commit: null
