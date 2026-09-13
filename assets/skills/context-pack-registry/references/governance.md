@@ -1,6 +1,6 @@
 # Governance
 
-## RBAC matrix
+RBAC matrix:
 
 | Action | MEMBER | LEAD |
 |---|---|---|
@@ -14,23 +14,12 @@
 | Modify policies | | ✓ |
 | Publish registry | | ✓ |
 
-Enforcement is on the server only. Git-side changes to governed artifacts are enforced through the repository's branch protection and CODEOWNERS; the registry trusts only artifacts on the protected branch whose checksums match the manifest.
+Enforced on the server only. Git-side changes to governed artifacts go through branch protection and CODEOWNERS; the registry trusts only protected-branch artifacts whose checksums match the manifest.
 
-## Promotion flow
+**Promotion:** 1) MEMBER registers a CANDIDATE with evidence → 2) LEAD verifies (VERIFIED) → 3) LEAD opens a PR adding or updating a context YAML with `sourceMemoryIds` → 4) after merge, LEAD marks the memory CANONICAL with `canonicalRef = path@commit`.
 
-1. MEMBER registers a CANDIDATE with evidence.
-2. LEAD verifies it (VERIFIED).
-3. LEAD opens a PR that adds or updates a context YAML with `sourceMemoryIds`.
-4. After merge, LEAD marks the memory CANONICAL with `canonicalRef = path@commit`.
+**Deprecation:** deprecating a memory also deprecates the linked context in a PR; history stays queryable.
 
-## Deprecation
+**Deletion:** only through an explicit governance policy (e.g. leaked secret, legal request), audited with actor, reason, time. Never a side effect of staleness or deprecation.
 
-Deprecating a memory also deprecates the linked context in a PR. History stays queryable.
-
-## Deletion
-
-Only through an explicit governance policy (for example, a leaked secret or legal request). Deletion is audited with actor, reason and time. Nothing is ever deleted as a side effect of staleness or deprecation.
-
-## Audit
-
-Every lifecycle transition and governance action writes an append-only audit record: actor, role, action, target, reason, timestamp.
+**Audit:** every lifecycle transition and governance action writes an append-only record: actor, role, action, target, reason, timestamp.

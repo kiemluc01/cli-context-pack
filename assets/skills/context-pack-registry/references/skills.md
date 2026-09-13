@@ -1,8 +1,8 @@
 # Skills
 
-A skill defines **how** an agent performs a kind of work. Skills live in Git, are versioned and checksummed, and are resolved per project so that only relevant skills activate, even when there are hundreds.
+A skill defines **how** an agent does a kind of work. Skills live in Git, are versioned and checksummed, and are resolved per project so only relevant ones activate, even among hundreds.
 
-## Skill metadata (indexed; content loaded only after resolution)
+Metadata (indexed; content loaded only after resolution):
 
 ```yaml
 id: nestjs-api            # unique across the registry
@@ -17,20 +17,11 @@ priority: 50              # tie-breaker, higher wins
 checksum: sha256:...      # see integrity.md
 ```
 
-## Resolution pipeline
+Resolution: Registry → ProjectModel → Rule filter → Team/Profile requirements → Scoring → Resolved skills
+1. **Rule filter:** drop skills whose `appliesTo` doesn't match the ProjectModel. Pure predicate, no AI.
+2. **Requirements:** add team- or profile-required skills; an unmet `requires` entry is an error, not a silent drop.
+3. **Scoring:** deterministic (e.g. matched `appliesTo` dimensions weighted by specificity, plus `priority`). Optional AI semantic ranking may reorder *already-eligible skills* only; everything must work with it off.
+4. **Conflicts:** by score, then `id` lexicographic order; report the losing skill.
+5. **Output:** ordered `{id, version, reason}`; load content only for resolved skills.
 
-```
-Registry → ProjectModel → Rule filter → Team/Profile requirements → Scoring → Resolved skills
-```
-
-1. **Rule filter:** drop skills whose `appliesTo` does not match the ProjectModel. Pure predicate, no AI.
-2. **Requirements:** add skills that the team or profile marks as required; an unmet `requires` entry is an error, not a silent drop.
-3. **Scoring:** a deterministic score, for example the number of matched `appliesTo` dimensions weighted by specificity, plus `priority`. Optional AI semantic ranking may reorder *among already-eligible skills* only, and the system must still work with it turned off.
-4. **Conflicts:** resolve by score, then by `id` lexicographic order, and report the losing skill.
-5. **Output:** an ordered list of `{id, version, reason}`. Load content only for resolved skills.
-
-## Rules
-
-- No duplicate canonical skills: the registry build fails on a duplicate `id` or identical content hashes under different IDs.
-- Publishing is a LEAD action (see `governance.md`).
-- Changing `appliesTo` changes which projects get a skill, so treat it as a behavior change that needs resolver tests.
+Rules: no duplicate canonical skills (registry build fails on a duplicate `id` or identical content hashes under different IDs) · publishing is a LEAD action (`governance.md`) · changing `appliesTo` changes which projects get a skill - a behavior change needing resolver tests.

@@ -1,33 +1,25 @@
 ---
 name: context-pack-registry
-description: Engineering control system for any non-trivial coding work in a repository that installs this pack. MANDATORY FIRST STEP — run the Context Gate in workflows/context-gate.md before writing any code, whenever the user asks to start a new project, init or scaffold a repo, work in an empty repo, or build any new feature, screen, page, module, API, CRUD list, management screen, form, detail view, dashboard, report, or import/export. This applies to short requests that name no stack, such as build an employee management web app, create a user list with CRUD, or make an inventory project. Gate open means read-only until the user answers one round of questions; then state your assumptions and implement in the same turn, without asking for confirmation of a summary. Also use this skill for ANY change to the Context Pack Registry codebase itself (ctxpack CLI, shared MCP server, PostgreSQL memory, Git-governed skills/context/policies/hooks, resolvers, capture, integrity, RBAC, releases), even when the user does not name it and even when the change looks small.
+description: Engineering control pipeline for non-trivial coding work in repos that install this pack. MANDATORY FIRST STEP - run the Context Gate (workflows/context-gate.md) before writing code for a new project, scaffold or empty repo, or any new feature, screen, page, module, API, CRUD list, management screen, form, detail view, dashboard, report or import/export, even a short request naming no stack (e.g. build an employee management web app). The gate always opens as interactive questions (AskUserQuestion when available) - read-only until every question item is settled (follow up on any item still unclear, never re-ask a settled one), then state assumptions and implement in the same turn. Also use for ANY change to the Context Pack Registry codebase (ctxpack CLI, shared MCP server, PostgreSQL memory, governed skills/context/policies/hooks, resolvers, capture, integrity, RBAC, releases), even small ones.
 ---
 
-# Context Pack Registry: Implementation Control
+# Context Pack Registry
 
-You are implementing Context Pack Registry inside a controlled pipeline. This file holds the rules and the routing table. Details live in `references/`, `workflows/`, `templates/` and `hooks/`. Load only the files the current task needs (see Reference Routing); loading everything defeats the purpose of this skill.
+Controlled pipeline for building Context Pack Registry - a shared knowledge and control plane: code changes become shared memory, are verified by people, promoted to canonical context, and reused by any agent (Claude, Copilot, Codex) through one shared MCP server. Load only the files the task needs (Routing).
 
-## What Context Pack Registry is
+It is not a skill installer, prompt manager, `.claude` config manager, vector database, chatbot, MCP wrapper or agent marketplace. If a task drifts there, stop and confirm.
 
-A shared engineering knowledge and control plane for AI coding agents. Code changes are captured into shared project memory, verified by people, promoted to canonical context, and reused by any agent (Claude, Copilot, Codex) through one shared MCP server.
+## Invariants (touching one = HIGH_RISK; checks in `references/architecture.md`)
 
-It is not a skill installer, prompt manager, `.claude` config manager, vector database, chatbot, MCP wrapper, or agent marketplace. If a task drifts toward one of those, stop and confirm with the user.
+1. **Eight separate concepts** - SKILL (how work is done), CONTEXT (current truth), MEMORY (history), HOOK (event guardrail), POLICY (allow/deny), REGISTRY (source of truth for governed artifacts), MCP (runtime interface), CLI (control). No type, table, module or command merges two.
+2. **Memory ≠ Context.** `OBSERVED → CANDIDATE → VERIFIED → CANONICAL → DEPRECATED` only via explicit, authorized transitions. Nothing auto-promotes; history is never silently deleted.
+3. **Git owns governed artifacts** (skills, canonical context, policies, hooks, profiles, teams, versions, registry config); **PostgreSQL behind MCP owns dynamic knowledge** (memories, decisions, observations, provenance, relationships). No vector DB in the MVP.
+4. **CLI ≠ MCP server.** The server deploys independently and is team-shared; memory never lives only on one machine.
+5. **RBAC is server-side.** LEAD/MEMBER checked on every call; local config never grants authority.
+6. **AI is optional.** Detection, checksums, secret enforcement, authorization, configuration are deterministic; AI only extracts, ranks, compresses, interprets.
+7. **Vendor-neutral core.** Agent adapters are out of scope unless requested.
 
-## Architecture invariants
-
-These are what make the product trustworthy. Breaking one silently corrupts shared team knowledge, so treat any change that touches them as HIGH_RISK.
-
-1. **Eight separate concepts.** SKILL (how work is done), CONTEXT (current canonical truth), MEMORY (historical knowledge), HOOK (event-triggered guardrail), POLICY (allow/deny), REGISTRY (source of truth for governed artifacts), MCP (runtime knowledge interface), CLI (control interface). No type, table, module or command merges two of them.
-2. **Memory ≠ Context.** Memory moves `OBSERVED → CANDIDATE → VERIFIED → CANONICAL → DEPRECATED` only through explicit, authorized transitions. Nothing auto-promotes. History is never silently deleted.
-3. **Git owns governed artifacts** (skills, canonical context, policies, hooks, profiles, teams, versions, registry config). **PostgreSQL behind MCP owns dynamic knowledge** (memories, decisions, observations, provenance, relationships). No vector DB in the MVP.
-4. **CLI ≠ MCP server.** The MCP server deploys independently and is shared by the team. Dynamic memory never lives only on one developer's machine.
-5. **RBAC is server-side.** LEAD and MEMBER permissions are checked by the server on every call. Local config never grants authority.
-6. **AI is optional.** Detection, checksums, secret enforcement, authorization and configuration are deterministic code. AI is used only for extraction, ranking, compression and interpretation.
-7. **Vendor-neutral core.** Agent-specific behavior lives in adapters, and adapters are out of scope unless requested.
-
-Verification commands for each invariant: `references/architecture.md`.
-
-## The pipeline
+## Pipeline
 
 ```
 CONTEXT GATE → REQUIREMENT MODEL → MCP CONTEXT → CHANGE-SCOPE → PLAN
@@ -35,44 +27,34 @@ CONTEXT GATE → REQUIREMENT MODEL → MCP CONTEXT → CHANGE-SCOPE → PLAN
 → REQUIREMENT GATE → ARCHITECTURE GATE → STOP
 ```
 
-It is mandatory for any non-trivial change. A trivial change (typo, comment, log wording, single-file rename with no behavior change) skips the gate questions but still runs relevant tests and the formatter.
+Mandatory for non-trivial changes. Trivial ones (typo, comment, log wording, no-behavior single-file rename) skip gate questions but still run relevant tests and the formatter.
 
-### 1. Context Gate
-
-Before writing code, classify the request:
+### 1. Context Gate (`workflows/context-gate.md`)
 
 | Class | Meaning | Action |
 |---|---|---|
-| CLEAR | One reasonable implementation exists | Proceed |
-| PARTIALLY_CLEAR | Missing details would change the code | Ask targeted questions |
-| AMBIGUOUS | Several valid implementations exist | Ask for a choice |
-| HIGH_RISK | Auth, RBAC, secrets, data loss, schema migration, API or MCP contract break, memory lifecycle, integrity | Get explicit confirmation of every dangerous assumption |
+| CLEAR | One reasonable implementation | Proceed |
+| PARTIALLY_CLEAR | Missing details change the code | Ask targeted questions |
+| AMBIGUOUS | Several valid implementations | Ask for a choice |
+| HIGH_RISK | Auth, RBAC, secrets, data loss, schema migration, API or MCP contract break, memory lifecycle, integrity | Explicit confirmation of every dangerous assumption |
 
-**The gate is one round, not a checkpoint.** Read-only ends the moment the answers arrive. Then write the decisions and any low-impact assumptions into the plan and start implementing in the same turn. Do not send the user a summary to approve, and do not re-ask what they just answered; if an answer turns out to be incomplete, choose the recommended default, record it as an assumption and keep going. The single exception is HIGH_RISK: there, every dangerous assumption needs an explicit go-ahead before any file changes.
-
-Ask only questions whose answers change the code. Give concrete options with a recommended default. Put all questions in one message, most important first, and keep it to about five for a typical feature. The question bank per task type is in `workflows/context-gate.md`.
-
-Never silently invent a requirement. A low-impact assumption is acceptable only if it is written into the plan where the user can see it.
+- **Always opens** for a new project, scaffold or empty repo, and any new feature, screen, page, module, API, CRUD or management screen, form, detail view, dashboard, report or import/export - never CLEAR, even when short or the stack is known. Ask that type's mandatory checklist.
+- Skip a checklist item only when the user, canonical context or VERIFIED/CANONICAL memory answers it explicitly, and name that source. Always ask authentication/authorization and delete behavior unless the user answered them in this conversation.
+- **Follow up per item, not a checkpoint.** The gate stays open for each numbered item until it is settled. An item the answers leave open (no answer, "Other" without a value, deferred content, a new sub-decision, a contradiction) gets a follow-up for that item only; never re-ask a settled item, never fill an open one with a default unless the user says to. When every item is settled, read-only ends: put decisions and low-impact assumptions in the plan and implement in the same turn, no summary to approve. HIGH_RISK items need an explicit choice before any file change.
+- **Ask through the interactive question tool** (`AskUserQuestion` in Claude Code; a typed question list only when the agent has no such tool). Only code-changing questions, concrete options with the recommended one first, most important first, about five for a typical feature - at most 4 per call, the rest in a second call right after. Never close the gate with a typed-reply instruction ("reply 1b 2c").
+- Never silently invent a requirement; low-impact assumptions must be visible in the plan.
 
 ### 2. Requirement model
 
-Build it compactly: Goal, Inputs, Outputs, Rules, Edge cases, Errors, Security, Performance, Persistence, External effects, Compatibility, Acceptance criteria. Number the items `R1..Rn`. Every R maps to at least one of implementation, test, configuration or documentation; an unmapped R means the work is not done. Decide *what must be tested* now, before coding.
+`R1..Rn` covering Goal, Inputs, Outputs, Rules, Edge cases, Errors, Security, Performance, Persistence, External effects, Compatibility, Acceptance criteria. Every R maps to implementation, test, configuration or documentation (unmapped = not done). Decide *what must be tested* before coding.
 
-### 3. MCP context retrieval
+### 3. MCP context
 
-Retrieve narrowly, in this order: current project → current module → relevant files → canonical context → recent memory → related decisions. Request metadata and summaries before full content. Stop when you can implement confidently, and never fetch the same item twice in one task.
+- Narrow order: project → module → relevant files → canonical context → recent memory → related decisions. Metadata and summaries before content; stop when confident; never fetch an item twice in one task.
+- Every session: derive one stable `project_slug` from the repo, register it with `project_register` and the local ProjectModel, and use that slug for all memory reads and candidate writes, so sessions share context without mounting the repo into the MCP server.
+- `MCP_UNAVAILABLE`: say so, fall back to Git canonical context plus local source, never guess team knowledge.
 
-For every session, derive one stable `project_slug` from the current repository and
-register it with the independent MCP server using `project_register` and the local
-ProjectModel. Use that slug for all subsequent memory reads and candidate writes so
-separate agent sessions share context without mounting the client repository into
-the MCP server.
-
-If the MCP server is unreachable (`MCP_UNAVAILABLE`), say so, fall back to canonical context in Git plus local source, and do not guess at team knowledge.
-
-### 4. Change-scope
-
-Write this block before editing:
+### 4. Change-scope (write before editing)
 
 ```
 CHANGE-SCOPE
@@ -85,50 +67,46 @@ API/MCP change: none | describe (backward compatible?)
 Security impact: none | describe
 ```
 
-Editing outside "Allowed" requires either a reason tied to a specific R or the user's approval.
+Editing outside "Allowed" needs a reason tied to an R, or user approval.
 
 ### 5. Implement with tests
 
-Tests are part of the implementation, not a follow-up. Any change to logic, business rules, API, database, resolver, MCP or CLI behavior creates or updates tests. Cover the happy path, boundaries, invalid/empty/null input, authorization, errors, regressions and domain edge cases. Assert on results, state, side effects, errors and permissions; "runs without throwing" is not a test unless that is the behavior. Never delete an existing test just because the implementation changed. Replace it with one that reflects the new explicit requirement. Details: `references/testing.md`.
+Tests are part of the implementation. Any change to logic, business rules, API, database, resolver, MCP or CLI behavior adds or updates tests: happy path, boundaries, invalid/empty/null input, authorization, errors, regressions, domain edge cases. Assert results, state, side effects, errors, permissions; "runs without throwing" is not a test unless that is the behavior. Never delete a test because the implementation changed; replace it with one matching the new explicit requirement. Details: `references/testing.md`.
 
-### 6. Quality gates
-
-Every applicable gate must pass before you report completion.
+### 6. Quality gates (every applicable one passes before reporting)
 
 | Gate | Pass condition |
 |---|---|
-| Unit tests | All pass, including pre-existing ones |
+| Unit tests | All pass, including pre-existing |
 | Coverage (changed code, not global) | Business logic ≥ 90%, critical logic ≥ 95%, security/auth/data-integrity as close to 100% as practical |
 | Security | `references/security.md` checklist; no secrets in code, logs, fixtures or captured memory |
-| Format | Project formatter applied to changed files only |
+| Format | Project formatter on changed files only |
 | Lint / typecheck | Pass where configured |
-| Requirement coverage | Matrix `R | Implemented | Tested | Status` with no Implemented = NO; ≥ 95% overall |
-| Architecture | Invariants above re-checked |
+| Requirement coverage | Matrix `R | Implemented | Tested | Status`, no Implemented = NO, ≥ 95% overall |
+| Architecture | Invariants re-checked |
 
-Use the tooling the project already has. Do not install a new tool when an existing one does the job.
+Use the project's existing tooling; never install a new tool when one does the job.
 
-### 7. Stop condition
+### 7. Stop
 
-Stop when all requested requirements are implemented and tested and every gate passes. Do not continue into unrequested refactoring, optimization, abstraction, adapters, features, vector search, AI integration or redesign. "While you're here" is not permission. Report worthwhile improvements under "Recommended next step" and leave them unimplemented, unless one is required to satisfy a current R.
+Stop when requested Rs are implemented, tested, and every gate passes. No unrequested refactoring, optimization, abstraction, adapters, features, vector search, AI integration or redesign - "while you're here" is not permission. Put worthwhile improvements under "Recommended next step" unless a current R requires one.
 
 ## Change-specific rules
 
-- **API / MCP contract change:** check request, response, validation, authn, authz, clients, tests, docs and backward compatibility. HIGH_RISK by default.
-- **Database change:** migration, rollback, existing data, indexes, constraints, transactions, tests. No destructive change without an explicit requirement.
-- **Performance:** optimize only with evidence (metrics, profiles, query plans, benchmarks). Never add caches, queues or vector stores on speculation.
-- **CLI:** read-only commands never mutate. `plan` previews, `apply` mutates, and both are idempotent.
-- **Errors:** use the explicit codes in `references/domain-model.md`, and every error says what happened, why, and how to fix it.
+- **API / MCP contract:** check request, response, validation, authn, authz, clients, tests, docs, backward compatibility. HIGH_RISK by default.
+- **Database:** migration, rollback, existing data, indexes, constraints, transactions, tests. No destructive change without an explicit requirement.
+- **Performance:** only with evidence (metrics, profiles, query plans, benchmarks); never speculative caches, queues or vector stores.
+- **CLI:** read-only commands never mutate; `plan` previews, `apply` mutates, both idempotent.
+- **Errors:** codes from `references/domain-model.md`; each says what happened, why, and how to fix.
 
-## Reference routing
-
-Load the smallest set that covers the task.
+## Routing (load the smallest set)
 
 | Task mentions | Load |
 |---|---|
 | Any non-trivial request (first step) | `workflows/context-gate.md` |
-| Generic feature or bug fix | `workflows/implement-feature.md` + the domain reference below |
+| Generic feature or bug fix | `workflows/implement-feature.md` + domain reference below |
 | Memory, capture, provenance, promotion, stale | `references/memory.md`, `workflows/implement-memory.md` |
-| MCP tool (`memory_*`, `context_*`, `skill_*`, `project_*`, status) | `references/mcp.md`, `workflows/implement-mcp-tool.md`, plus the tool's domain reference |
+| MCP tool (`memory_*`, `context_*`, `skill_*`, `project_*`, status) | `references/mcp.md`, `workflows/implement-mcp-tool.md` + the tool's domain reference |
 | ctxpack command | `references/cli.md`, `workflows/implement-cli-command.md` |
 | Context inheritance or resolution | `references/context.md`, `workflows/implement-resolver.md` |
 | Skill registry or resolution | `references/skills.md`, `workflows/implement-resolver.md` |
@@ -136,7 +114,7 @@ Load the smallest set that covers the task.
 | RBAC, publish, promote, deprecate | `references/governance.md`, `references/security.md` |
 | Checksums, lockfile, tamper detection | `references/integrity.md` |
 | Secrets, auth, logging, injection | `references/security.md` |
-| Hooks (pre-commit and others) | `hooks/README.md`, then the specific hook script |
+| Hooks (pre-commit and others) | `hooks/README.md`, then the hook script |
 | Tests, coverage | `workflows/testing.md`; `references/testing.md` for strategy |
 | Package layout, dependency direction | `references/architecture.md` |
 | Versioning, publishing, deploy | `workflows/release.md` |
@@ -161,4 +139,4 @@ Known Limitations: - ...
 Recommended Next Step: - ...
 ```
 
-If a gate could not run (for example, no coverage tool is configured), say so explicitly. Never report it as passed.
+A gate that could not run (e.g. no coverage tool) is stated explicitly, never reported as passed.
