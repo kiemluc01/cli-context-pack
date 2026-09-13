@@ -1,0 +1,151 @@
+#!/bin/sh
+# Context Pack Registry: formatter for staged files (pre-commit).
+#
+# Priority: the repository's configured formatter first, the language default
+# second. Nothing is installed, and only staged files are formatted (never the
+# whole repository).
+#
+#   JS/TS/JSON/CSS/MD  prettier (config present) > biome (biome.json) > prettier if installed locally
+#   Python             ruff/black per pyproject/ruff.toml > ruff > black
+#   Go                 gofmt
+#   Rust               cargo fmt
+#   Java / Kotlin      spotless (Gradle/Maven, if configured) > google-java-format / ktlint
+#
+# Modes (AGENT_FORMAT_MODE):
+#   fix   (default) format fully-staged files and re-stage them
+#   check           fail if formatting would change a file; leave files untouched
+#
+# Partially staged files (unstaged edits in the same file) are never
+# auto-formatted, because re-staging would sweep unstaged hunks into the commit.
+# They are reported and left to CI.
+# Exit codes: 0 pass, 1 fail, 3 nothing to format, 98 no formatter configured.
+set -u
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "format: not a git repository" >&2; exit 1; }
+cd "$ROOT" || exit 1
+MODE=${AGENT_FORMAT_MODE:-fix}
+
+STAGED=$(git -c core.quotepath=off diff --cached --name-only --diff-filter=ACMR)
+[ -n "$STAGED" ] || exit 3
+UNSTAGED=$(git -c core.quotepath=off diff --name-only)
+
+have() { command -v "$1" >/dev/null 2>&1; }
+bin() { if [ -x "node_modules/.bin/$1" ]; then echo "node_modules/.bin/$1"; fi; }
+pkg_has() { [ -f package.json ] && grep -q "\"$1\"" package.json; }
+py_has() { { [ -f pyproject.toml ] && grep -q "^\[tool\.$1" pyproject.toml; } || [ -f "$1.toml" ] || [ -f ".$1.toml" ]; }
+
+js=""; py=""; go=""; rs=""; jv=""; kt=""; partial=""
+while IFS= read -r f; do
+  [ -n "$f" ] && [ -f "$f" ] || continue
+  case "$(basename "$f")" in package-lock.json|pnpm-lock.yaml|yarn.lock|*.lock|*.min.*) continue ;; esac
+  if printf '%s\n' "$UNSTAGED" | grep -Fxq -- "$f"; then
+    case "$f" in *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.json|*.css|*.scss|*.md|*.py|*.go|*.rs|*.java|*.kt) partial="$partial
+$f" ;; esac
+    continue
+  fi
+  case "$f" in
+    *.ts|*.tsx|*.mts|*.cts|*.js|*.jsx|*.mjs|*.cjs|*.json|*.css|*.scss|*.md|*.yaml|*.yml) js="$js
+$f" ;;
+    *.py) py="$py
+$f" ;;
+    *.go) go="$go
+$f" ;;
+    *.rs) rs="$rs
+$f" ;;
+    *.java) jv="$jv
+$f" ;;
+    *.kt|*.kts) kt="$kt
+$f" ;;
+  esac
+done <<LIST
+$STAGED
+LIST
+
+fail=0 ran=0 tools=""
+run_on() { # run_on "<file list>" cmd args...  (files appended as arguments)
+  list=$1; shift
+  [ -n "$(printf '%s' "$list" | tr -d '\n')" ] || return 0
+  ran=1
+  # shellcheck disable=SC2046
+  printf '%s\n' "$list" | sed '/^$/d' | tr '\n' '\0' | xargs -0 "$@" >/dev/null 2>"$errf" || {
+    echo "  FILE:   (formatter error) $*"; sed 's/^/          /' "$errf" | head -n 20; fail=1; }
+}
+errf=$(mktemp) || exit 1
+trap 'rm -f "$errf"' EXIT
+
+# ---- JS/TS and friends
+if [ -n "$js" ]; then
+  prettier=$(bin prettier)
+  if ls .prettierrc* prettier.config.* >/dev/null 2>&1 || pkg_has prettier; then
+    if [ -n "$prettier" ]; then run_on "$js" "$prettier" --write --ignore-unknown; tools="$tools prettier"
+    else echo "  WARN:   Prettier is configured but not installed (run your package manager's install)"; fi
+  elif [ -f biome.json ] || [ -f biome.jsonc ]; then
+    biome=$(bin biome); [ -n "$biome" ] && { run_on "$js" "$biome" format --write --no-errors-on-unmatched; tools="$tools biome"; }
+  elif [ -n "$prettier" ]; then run_on "$js" "$prettier" --write --ignore-unknown; tools="$tools prettier"
+  fi
+fi
+# ---- Python
+if [ -n "$py" ]; then
+  if py_has ruff && have ruff; then run_on "$py" ruff format; tools="$tools ruff"
+  elif py_has black && have black; then run_on "$py" black -q; tools="$tools black"
+  elif have ruff; then run_on "$py" ruff format; tools="$tools ruff"
+  elif have black; then run_on "$py" black -q; tools="$tools black"
+  fi
+fi
+# ---- Go / Rust
+[ -n "$go" ] && have gofmt && { run_on "$go" gofmt -w; tools="$tools gofmt"; }
+[ -n "$rs" ] && have cargo && { run_on "$rs" cargo fmt --; tools="$tools rustfmt"; }
+# ---- Java / Kotlin
+if [ -n "$jv$kt" ]; then
+  if grep -qs spotless build.gradle build.gradle.kts && [ -x ./gradlew ]; then
+    ran=1; tools="$tools spotless"; ./gradlew -q spotlessApply >/dev/null 2>"$errf" || { echo "  FILE:   (spotless error)"; head -n 20 "$errf"; fail=1; }
+  elif grep -qs spotless pom.xml && have mvn; then
+    ran=1; tools="$tools spotless"; mvn -q spotless:apply >/dev/null 2>"$errf" || { echo "  FILE:   (spotless error)"; head -n 20 "$errf"; fail=1; }
+  else
+    [ -n "$jv" ] && have google-java-format && { run_on "$jv" google-java-format --replace; tools="$tools google-java-format"; }
+    [ -n "$kt" ] && have ktlint && { run_on "$kt" ktlint -F; tools="$tools ktlint"; }
+  fi
+fi
+
+if [ -n "$partial" ]; then
+  echo "  WARN:   Not auto-formatted (partially staged; re-staging would include unstaged edits):"
+  printf '%s\n' "$partial" | sed '/^$/d; s/^/          /'
+  echo "          Run the formatter manually, or stage the whole file. CI will enforce formatting."
+fi
+
+if [ "$ran" -ne 1 ]; then
+  [ -n "$partial" ] && exit 0
+  if [ -n "$(printf '%s%s%s%s%s%s' "$js" "$py" "$go" "$rs" "$jv" "$kt" | tr -d '\n')" ]; then
+    echo "  INFO:   No formatter configured or installed for the staged file types (none imposed)."
+    exit 98
+  fi
+  exit 3
+fi
+
+# Fully staged files have working tree == index, so any working-tree diff now
+# was produced by the formatter.
+all=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$js" "$py" "$go" "$rs" "$jv" "$kt" | sed '/^$/d')
+changed=$(printf '%s\n' "$all" | while IFS= read -r f; do git diff --quiet -- "$f" || echo "$f"; done)
+
+if [ "$fail" -ne 0 ]; then
+  [ -n "$changed" ] && printf '%s\n' "$changed" | tr '\n' '\0' | xargs -0 git checkout -q --
+  echo "[FAIL] Formatter:$tools reported errors (files restored to their staged content)"
+  echo "  FIX:    Fix the syntax errors above, then commit again."
+  exit 1
+fi
+
+if [ -n "$changed" ]; then
+  if [ "$MODE" = check ]; then
+    printf '%s\n' "$changed" | tr '\n' '\0' | xargs -0 git checkout -q --
+    echo "[FAIL] Formatter:$tools, the following files are not formatted:"
+    printf '%s\n' "$changed" | sed 's/^/  FILE:   /'
+    echo "  FIX:    Run the formatter on these files and re-stage them (or use AGENT_FORMAT_MODE=fix)."
+    exit 1
+  fi
+  printf '%s\n' "$changed" | tr '\n' '\0' | xargs -0 git add --
+  echo "[PASS] Formatter:$tools reformatted and re-staged:"
+  printf '%s\n' "$changed" | sed 's/^/          /'
+  exit 0
+fi
+echo "[PASS] Formatter:$tools (no changes needed)"
+exit 0

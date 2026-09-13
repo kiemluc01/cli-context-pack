@@ -1,0 +1,3 @@
+- Reference/build checks pass after removal.
+- Required behavior tests pass.
+- The patch does not win by deleting acceptance requirements.

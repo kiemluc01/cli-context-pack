@@ -8,6 +8,22 @@ cd your-project
 ctxpack init
 ```
 
+Install the tarball from inside the target project. This puts the `ctxpack` binary in that project's `node_modules/.bin`; use `--no-install` so npm cannot silently resolve the unrelated unscoped `ctxpack` package:
+
+```bash
+cd your-project
+npm install --save-dev /path/to/package/releases/aristha-ctxpack-0.3.0.tgz
+npx --no-install ctxpack install claude
+```
+
+If the tarball is not installed in the target project, run it explicitly instead:
+
+```bash
+npx --yes --package /path/to/aristha-ctxpack-0.3.0.tgz ctxpack install claude
+```
+
+After publishing, install `@aristha/ctxpack` in the target project and use the same `npx --no-install ctxpack install claude` command.
+
 Requirements: Node.js ≥ 18.17. Git is optional, but hooks need it. Works on Linux, macOS and Windows.
 
 ## What `init` installs
@@ -30,7 +46,18 @@ Requirements: Node.js ≥ 18.17. Git is optional, but hooks need it. Works on Li
 | `ctxpack plan` | no | Show what `apply` would change. `--exit-code` exits 3 on drift (for CI) |
 | `ctxpack apply` | yes | Converge the project to the config and the bundled skill version |
 | `ctxpack status` | no | Installed vs bundled version, modified files; exit 3 on drift |
-| `ctxpack doctor` | no | Check node, git, sh, symlink support, config, integrity and hook setup |
+| `ctxpack doctor` | no | Check node, git, sh, adapters, config, integrity, benchmarks and hook setup |
+
+Platform adapters are generated from the same canonical skill source:
+
+```bash
+ctxpack install claude
+ctxpack install codex
+ctxpack install copilot
+ctxpack status
+```
+
+Claude uses `.claude/skills`, Codex uses `.codex/skills`, and Copilot uses `.github/instructions/*.instructions.md`. Repeating an install is idempotent; locally modified managed files are reported as conflicts. `assets/registry.yaml` describes the supported skills, intensity modes (`lite`, `full`, `ultra`) and adapters.
 
 Global options: `--cwd <dir>`, `--json`, `--verbose`. Exit codes: `0` ok · `1` failed or blocked · `2` usage/config error · `3` drift.
 
@@ -70,6 +97,13 @@ npm install
 npm test            # validate the bundled CLI and print its version
 npm pack            # produces aristha-ctxpack-<version>.tgz
 npm run pack:local  # writes the installable tarball to releases/
+npm run benchmark:self-test
+```
+
+To compare context loading without external API calls, provide two captured prompt files:
+
+```bash
+npm run context:analyze -- --before before.txt --after after.txt
 ```
 
 The bundled skill lives in `assets/skills/context-pack-registry/`. Its hooks have their own suite: `sh assets/skills/context-pack-registry/hooks/test-hooks.sh`.

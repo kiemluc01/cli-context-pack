@@ -1,0 +1,2 @@
+- Use the repository test framework and fixtures.
+- Test behavior, errors and relevant boundaries.

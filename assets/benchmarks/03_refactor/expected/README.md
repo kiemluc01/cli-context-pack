@@ -1,0 +1,1 @@
+Expected fixture records the smallest behavior-preserving refactor.

@@ -1,0 +1,2 @@
+- Reject malformed input with the repository error contract.
+- Do not duplicate validation in downstream layers.

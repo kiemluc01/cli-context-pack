@@ -1,0 +1,3 @@
+- Fresh and upgraded fixtures both pass.
+- Migration is reversible in the test database.
+- No destructive operation is introduced.

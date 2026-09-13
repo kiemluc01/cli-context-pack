@@ -1,0 +1,1 @@
+Expected fixture records the focused bug fix and regression test.

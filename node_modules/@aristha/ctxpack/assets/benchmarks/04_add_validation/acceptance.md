@@ -1,0 +1,3 @@
+- Valid boundary values pass.
+- Invalid, empty and null values are covered.
+- Authorization and error handling remain intact.

@@ -1,0 +1,2 @@
+- Capture a before measurement using existing tooling.
+- Keep output and failure behavior unchanged.

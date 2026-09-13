@@ -1,0 +1,2 @@
+- Regression test fails before the patch and passes after it.
+- Adjacent behavior remains unchanged.

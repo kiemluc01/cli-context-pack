@@ -1,0 +1,1 @@
+Expected fixture records the minimal endpoint patch and its tests.

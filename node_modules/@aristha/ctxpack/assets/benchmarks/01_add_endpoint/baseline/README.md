@@ -1,0 +1,1 @@
+Baseline fixture is the unmodified repository snapshot.

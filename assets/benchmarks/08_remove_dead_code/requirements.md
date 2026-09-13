@@ -1,0 +1,2 @@
+- Establish evidence from references, build or tests before removal.
+- Preserve exports and runtime side effects that are still required.

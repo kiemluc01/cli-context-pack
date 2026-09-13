@@ -1,0 +1,3 @@
+- Benchmark shows a repeatable improvement on the supplied fixture.
+- Correctness tests pass.
+- No unrelated optimization is included.

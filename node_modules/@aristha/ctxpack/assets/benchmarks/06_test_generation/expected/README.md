@@ -1,0 +1,1 @@
+Expected fixture records only the missing behavior tests.

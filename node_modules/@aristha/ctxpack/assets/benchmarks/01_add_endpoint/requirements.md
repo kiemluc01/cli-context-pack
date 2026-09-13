@@ -1,0 +1,2 @@
+- Add the endpoint and input validation.
+- Preserve existing routes and error format.

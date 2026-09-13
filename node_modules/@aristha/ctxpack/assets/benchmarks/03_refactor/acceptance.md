@@ -1,0 +1,3 @@
+- Existing tests pass unchanged.
+- The duplicated path has one implementation.
+- No new dependency is introduced.

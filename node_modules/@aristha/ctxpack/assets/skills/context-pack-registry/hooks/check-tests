@@ -1,0 +1,182 @@
+#!/bin/sh
+# Context Pack Registry: unit test presence check (pre-commit).
+#
+# For every staged source file containing logic, require a corresponding test
+# that is tracked or staged. Exit codes: 0 pass, 1 blocked, 3 nothing to check.
+#
+# Exemptions are deterministic:
+#   1. Built-in categories (docs, config, lock files, generated, types-only,
+#      static assets, migrations, .agent/ artifacts); see is_builtin_exempt.
+#   2. Re-export-only files (JS/TS barrels, Python __init__ with imports only).
+#   3. Repository patterns in .agent/test-exemptions (one shell glob per line,
+#      '#' comments; '*' also matches '/'). Override the path with
+#      AGENT_TEST_EXEMPTIONS.
+set -u
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "check-tests: not a git repository" >&2; exit 1; }
+cd "$ROOT" || exit 1
+
+EXEMPT_FILE=${AGENT_TEST_EXEMPTIONS:-.agent/test-exemptions}
+STAGED=$(git -c core.quotepath=off diff --cached --name-only --diff-filter=ACMR)
+[ -n "$STAGED" ] || exit 3
+ALL_FILES=$(git -c core.quotepath=off ls-files --cached)
+
+is_test_file() {
+  case "$1" in
+    *.spec.*|*.test.*|*_test.go|*_test.py|test_*.py|*/test_*.py) return 0 ;;
+    *Test.java|*Tests.java|*IT.java|*Test.kt|*Tests.kt) return 0 ;;
+    *_spec.rb|*_test.rb|*Test.cs|*Tests.cs|*Test.php) return 0 ;;
+    tests/*|test/*|__tests__/*|spec/*|*/tests/*|*/test/*|*/__tests__/*|*/spec/*) return 0 ;;
+  esac
+  return 1
+}
+
+is_builtin_exempt() {
+  case "$1" in
+    # documentation
+    *.md|*.mdx|*.rst|*.txt|README*|*/README*|LICENSE*|CHANGELOG*|docs/*|*/docs/*) return 0 ;;
+    # configuration and lock files
+    *.json|*.jsonc|*.yaml|*.yml|*.toml|*.ini|*.cfg|*.conf|*.properties|*.xml|*.lock|go.sum) return 0 ;;
+    .env.example|*/.env.example|.editorconfig|.gitignore|.gitattributes|*.config.js|*.config.cjs|*.config.mjs|*.config.ts) return 0 ;;
+    # types-only
+    *.d.ts) return 0 ;;
+    # generated
+    *.generated.*|*.gen.*|*_pb2.py|*.pb.go|dist/*|build/*|generated/*|*/dist/*|*/build/*|*/generated/*) return 0 ;;
+    # static assets
+    *.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico|*.webp|*.css|*.scss|*.less|*.woff|*.woff2|*.ttf|*.eot|*.pdf) return 0 ;;
+    # migrations
+    migrations/*|*/migrations/*|*/migration/*|*/db/migrate/*) return 0 ;;
+    # governed agent artifacts (skills, hooks, templates), not application source
+    .agent/*) return 0 ;;
+  esac
+  return 1
+}
+
+is_repo_exempt() {
+  [ -f "$EXEMPT_FILE" ] || return 1
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    case "$pat" in ''|'#'*) continue ;; esac
+    # shellcheck disable=SC2254
+    case "$1" in $pat) return 0 ;; esac
+  done < "$EXEMPT_FILE"
+  return 1
+}
+
+source_kind() {
+  case "$1" in
+    *.ts|*.tsx|*.mts|*.cts|*.js|*.jsx|*.mjs|*.cjs) echo js ;;
+    *.py) echo py ;;
+    *.go) echo go ;;
+    *.java) echo java ;;
+    *.kt) echo kt ;;
+    *.rs) echo rs ;;
+    *.rb) echo rb ;;
+    *.cs) echo cs ;;
+    *.php) echo php ;;
+    *) echo "" ;;
+  esac
+}
+
+# True when the staged content only re-exports (no logic to test).
+# Deliberately strict: any line that is not an import/re-export/comment fails it.
+is_reexport_only() {
+  kind=$1 f=$2
+  id='[A-Za-z_$][A-Za-z0-9_$]*'
+  case "$kind" in
+    js) re="^[[:space:]]*(import[[:space:]].*|export[[:space:]]+(type[[:space:]]+)?(\\*|\\{[^}]*\\})[[:space:]]*(as[[:space:]]+${id}[[:space:]]*)?from[[:space:]].*|export[[:space:]]+(type[[:space:]]+)?\\{|${id}([[:space:]]+as[[:space:]]+${id})?,?|\\}[[:space:]]*from[[:space:]].*|//.*|/\\*.*|\\*.*)$" ;;
+    py) re="^[[:space:]]*(from[[:space:]].*[[:space:]]import[[:space:]].*|import[[:space:]].*|__all__[[:space:]]*=.*|[A-Za-z_][A-Za-z0-9_]*,?|[\"'][A-Za-z_][A-Za-z0-9_]*[\"'],?|[])]|#.*)$" ;;
+    *) return 1 ;;
+  esac
+  body=$(git show ":$f" 2>/dev/null | grep -v '^[[:space:]]*$') || return 0
+  printf '%s\n' "$body" | grep -Evq "$re" && return 1
+  return 0
+}
+
+regex_escape() { printf '%s' "$1" | sed 's/[][\.*^$+?(){}|/]/\\&/g'; }
+
+# Echo the first matching test path, or nothing.
+find_test() {
+  kind=$1 f=$2
+  dir=$(dirname "$f"); base=$(basename "$f"); stem=${base%.*}; ext=${base##*.}
+  es=$(regex_escape "$stem")
+  case "$kind" in
+    js)   pat="${es}\.(spec|test)\.[cm]?[jt]sx?" ;;
+    py)   pat="(test_${es}|${es}_test)\.py" ;;
+    go)   # Go tests must live in the same package directory.
+          t="$dir/${stem}_test.go"; [ "$dir" = "." ] && t="${stem}_test.go"
+          printf '%s\n' "$ALL_FILES" | grep -Fxq "$t" && echo "$t"; return ;;
+    java|kt) pat="${es}(Test|Tests|IT)\.${ext}" ;;
+    rs)   if git show ":$f" 2>/dev/null | grep -q '#\[cfg(test)\]'; then echo "$f (inline #[cfg(test)])"; return; fi
+          pat="tests/(.*/)?${es}\.rs" ;;
+    rb)   pat="(${es}_spec|${es}_test|test_${es})\.rb" ;;
+    cs)   pat="${es}Tests?\.cs" ;;
+    php)  pat="${es}Test\.php" ;;
+  esac
+  matches=$(printf '%s\n' "$ALL_FILES" | grep -E "(^|/)${pat}$")
+  [ -n "$matches" ] || return
+  # Generic file names (index, main, utils...) require a test near the source,
+  # otherwise any same-named test elsewhere would satisfy the check.
+  case "$stem" in
+    index|main|mod|lib|__init__|utils|util|helpers|helper|types|constants|config|app|server)
+      parent=$(basename "$dir")
+      printf '%s\n' "$matches" | while IFS= read -r m; do
+        mdir=$(dirname "$m")
+        if [ "$mdir" = "$dir" ] || [ "$mdir" = "$dir/__tests__" ]; then echo "$m"; break; fi
+        case "/$mdir/" in */"$parent"/*) [ "$dir" != "." ] && { echo "$m"; break; } ;; esac
+      done ;;
+    *) printf '%s\n' "$matches" | head -n 1 ;;
+  esac
+}
+
+expected_test() {
+  kind=$1 f=$2
+  dir=$(dirname "$f"); base=$(basename "$f"); stem=${base%.*}; ext=${base##*.}
+  case "$kind" in
+    js)
+      if [ -d tests ]; then echo "tests/$(dirname "${f#src/}")/${stem}.spec.${ext}" | sed 's#/\./#/#'
+      else echo "$dir/${stem}.spec.${ext}"; fi ;;
+    py) echo "tests/test_${stem}.py" ;;
+    go) echo "$dir/${stem}_test.go" ;;
+    java|kt) echo "$dir/${stem}Test.${ext}" | sed 's#/main/#/test/#' ;;
+    rs) echo "an inline #[cfg(test)] module in $f, or tests/${stem}.rs" ;;
+    rb) echo "spec/${stem}_spec.rb" ;;
+    cs) echo "${stem}Tests.cs in the test project" ;;
+    php) echo "tests/${stem}Test.php" ;;
+  esac
+}
+
+missing=0 checked=0
+tmp_out=$(mktemp) || exit 1
+trap 'rm -f "$tmp_out"' EXIT
+
+printf '%s\n' "$STAGED" | while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  kind=$(source_kind "$f")
+  [ -n "$kind" ] || continue
+  is_test_file "$f" && continue
+  is_builtin_exempt "$f" && continue
+  is_repo_exempt "$f" && continue
+  is_reexport_only "$kind" "$f" && continue
+  echo "CHECKED" >> "$tmp_out"
+  t=$(find_test "$kind" "$f")
+  if [ -z "$t" ]; then
+    {
+      echo "MISSING"
+      echo "  FILE:   $f"
+      echo "  REASON: No corresponding unit test detected (tracked or staged)."
+      echo "  FIX:    Add $(expected_test "$kind" "$f"),"
+      echo "          or, if this file has no testable logic, add an explicit pattern to $EXEMPT_FILE."
+    } >> "$tmp_out"
+  fi
+done
+
+checked=$(grep -c '^CHECKED$' "$tmp_out" || true)
+missing=$(grep -c '^MISSING$' "$tmp_out" || true)
+[ "$checked" -gt 0 ] || exit 3
+if [ "$missing" -gt 0 ]; then
+  echo "[FAIL] Unit test check: $missing of $checked changed source file(s) have no test"
+  grep -v -e '^CHECKED$' -e '^MISSING$' "$tmp_out"
+  exit 1
+fi
+echo "[PASS] Unit test check: $checked changed source file(s) have tests"
+exit 0

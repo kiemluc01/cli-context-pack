@@ -1,0 +1,3 @@
+- New tests fail against a deliberate mutation.
+- New tests pass against the unchanged implementation.
+- No production code is changed without evidence.

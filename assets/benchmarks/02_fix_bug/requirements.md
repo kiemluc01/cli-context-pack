@@ -1,0 +1,2 @@
+- Reproduce the reported defect.
+- Fix the controlling code path, not only the symptom.

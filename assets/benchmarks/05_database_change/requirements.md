@@ -1,0 +1,2 @@
+- Include migration and rollback behavior.
+- Preserve existing records and constraints.

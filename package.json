@@ -18,16 +18,35 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "npm run build && node dist/bin.js --version",
+    "benchmark:self-test": "node scripts/benchmark.mjs --self-test",
+    "context:analyze": "node scripts/context-efficiency.mjs",
     "pack:local": "node scripts/pack-local.mjs",
     "prepack": "npm run build"
   },
-  "keywords": ["context-pack-registry", "claude-code", "skills", "pre-commit", "cli"],
+  "keywords": [
+    "context-pack-registry",
+    "claude-code",
+    "skills",
+    "pre-commit",
+    "cli"
+  ],
   "license": "UNLICENSED",
   "publishConfig": {
     "access": "public"
   },
   "devDependencies": {
+    "@aristha/ctxpack": "file:releases/aristha-ctxpack-0.3.0.tgz",
     "@types/node": "^22.10.0",
     "typescript": "^5.6.0"
-  }
+  },
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kiemluc01/cli-context-pack.git"
+  },
+  "author": "",
+  "bugs": {
+    "url": "https://github.com/kiemluc01/cli-context-pack/issues"
+  },
+  "homepage": "https://github.com/kiemluc01/cli-context-pack#readme"
 }

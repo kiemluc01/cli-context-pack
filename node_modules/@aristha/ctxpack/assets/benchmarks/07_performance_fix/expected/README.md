@@ -1,0 +1,1 @@
+Expected fixture records before/after measurements and the focused patch.

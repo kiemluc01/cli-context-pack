@@ -1,0 +1,15 @@
+version: 1
+skills:
+  - name: context-pack-registry
+    mode: always-on
+    intensity: [lite, full, ultra]
+  - name: minimalism-review
+    mode: user
+    intensity: [lite, full, ultra]
+platforms:
+  claude:
+    adapter: .claude/skills
+  codex:
+    adapter: .codex/skills
+  copilot:
+    adapter: .github/instructions

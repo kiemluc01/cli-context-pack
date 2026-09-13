@@ -1,0 +1,3 @@
+- New valid request returns the documented success shape.
+- Invalid input returns the existing validation error.
+- Existing endpoint tests pass.

@@ -1,0 +1,1 @@
+Expected fixture records evidence, deletion and regression checks.
