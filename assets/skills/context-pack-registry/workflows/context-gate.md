@@ -55,9 +55,9 @@ No summary to confirm, no "shall I start?". Never fill an open item with the rec
 
 ## Question format
 
-**Open the gate with the agent's interactive question tool** - `AskUserQuestion` in Claude Code, or any equivalent that renders selectable options and collects the answer. A question list typed into a chat message is not an open gate; use it only when the agent has no such tool (Text fallback).
+**Every question or confirmation goes through the agent's interactive question tool** - `AskUserQuestion` in Claude Code, or any equivalent that renders selectable options and collects the answer. That covers gate items, follow-ups, HIGH_RISK go-aheads, decisions taken from context or conventions that you want the user to confirm, and any approval the pipeline needs later (editing outside CHANGE-SCOPE, a task drifting out of the product). A chat message never asks the user to type an answer, and a question list typed into chat is not an open gate. Use text only when the agent has no such tool (Text fallback).
 
-Before the first call, write one short line: `Taken from existing context: <decision> (<source>), ... Everything else from <conventions>.` Then call the tool:
+Before the first call you may write one informational line: `Taken from existing context: <decision> (<source>), ...`. It states decisions and never asks for a reply. If any of them should be confirmed, ask in the tool - e.g. `Keep the conventions taken from context/?` with `Keep all (Recommended)` / `Change some` - not in the text. Then call the tool:
 
 - **One question per checklist item or unknown**, in checklist order, most important first. `question` is the specific technical question ending in `?`; `header` is a chip of at most 12 characters (`Data scope`, `Auth`, `Delete`, `Fields`, `List`).
 - **2-4 concrete options.** `label` 1-5 words; `description` states what the option means and its trade-off. The recommended option comes first with ` (Recommended)` appended to its label, and its description gives the one-line reason. Never add an "Other" option - the tool provides free text.
@@ -65,7 +65,7 @@ Before the first call, write one short line: `Taken from existing context: <deci
 - **At most 4 questions per call.** When a checklist has more (a feature has 5 items), make the next call as soon as the first returns - same gate round, still read-only, nothing implemented in between.
 - `multiSelect: true` only for non-exclusive choices (e.g. which fields search covers). `preview` only to compare concrete artifacts (layouts, schemas, code), never for simple preferences.
 - Write questions and options in the user's language.
-- **Nothing after the call.** No "reply with 1b 2c", no "type 'recommended' to start" - the tool collects the answer.
+- **No typed-reply instruction anywhere** - before, between or after calls. No "reply with 1b 2c", no "trả lời ngắn", no "type 'recommended' to start" - the tool collects the answer.
 
 Be specific - good: "Should `memory_search` use case-insensitive *contains* on title and body, or PostgreSQL full-text search with ranking?" with options `Full-text + GIN (Recommended)` / `ILIKE contains`. Bad: "How should search work?"
 
@@ -116,4 +116,4 @@ Items 6-7 usually come from canonical context (`tech-stack.yaml`, `architecture.
 
 ## Anti-patterns
 
-A 20-question questionnaire for a small change · asking what the code answers · open-ended questions without options · typing the gate questions into a chat message when an interactive question tool is available · ending the gate with a typed-reply instruction ("reply 1b 2c", "type 'recommended'") · calling a new project, feature, screen or CRUD module CLEAR because it is short or the stack is known · skipping authentication or delete behavior because a default looks obvious · dropping a checklist item without naming its source · implementing before the answer arrives · asking to confirm a summary once every item is settled · re-asking a settled item · filling an open item with a default instead of a follow-up · proceeding on a HIGH_RISK assumption without explicit confirmation.
+A 20-question questionnaire for a small change · asking what the code answers · open-ended questions without options · typing the gate questions into a chat message when an interactive question tool is available · asking the user to type an answer anywhere ("reply 1b 2c", "trả lời ngắn", "type 'recommended'") · asking in text to confirm decisions taken from context or conventions instead of a tool question · calling a new project, feature, screen or CRUD module CLEAR because it is short or the stack is known · skipping authentication or delete behavior because a default looks obvious · dropping a checklist item without naming its source · implementing before the answer arrives · asking to confirm a summary once every item is settled · re-asking a settled item · filling an open item with a default instead of a follow-up · proceeding on a HIGH_RISK assumption without explicit confirmation.
