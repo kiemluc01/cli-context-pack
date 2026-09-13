@@ -4,8 +4,8 @@ export const CONFIG_PATH = ".agent/ctxpack.json";
 export const LOCK_PATH = ".agent/ctxpack.lock.json";
 export const TARGETS = ["claude", "codex", "copilot"];
 export const LINK_MODES = ["auto", "symlink", "copy"];
-export function defaultConfig() {
-    return { schemaVersion: 1, skills: ["context-pack-registry"], targets: ["claude"], linkMode: "auto", hooks: { preCommit: true } };
+export function defaultConfig(target = "claude") {
+    return { schemaVersion: 1, skills: ["context-pack-registry"], targets: [target], linkMode: "auto", hooks: { preCommit: true } };
 }
 /** JSON with recursively sorted keys and a trailing newline: byte-identical across runs. */
 export function stableJson(value) {

@@ -16,6 +16,8 @@ npm install --save-dev /path/to/package/releases/aristha-ctxpack-0.3.0.tgz
 npx --no-install ctxpack install claude
 ```
 
+`install <platform>` installs only that platform adapter: Claude creates `CLAUDE.md` and `.claude/skills`, Codex creates `.codex/skills`, and Copilot creates `.github/instructions`. The shared canonical source remains in `.agent/skills`. Switching platforms removes only adapter files managed by ctxpack; user-authored content is preserved.
+
 If the tarball is not installed in the target project, run it explicitly instead:
 
 ```bash

@@ -72,8 +72,8 @@ export function install(ctx, platform) {
     if (!['claude', 'codex', 'copilot'].includes(platform))
         throw new CtxpackError("USAGE_ERROR", `Unknown platform "${platform}"`, "ctxpack supports Claude, Codex, and Copilot adapters.", 'Run "ctxpack install claude|codex|copilot".', EXIT.USAGE);
     const existing = readConfig(loc.root);
-    const { config: migrated } = existing ? migrateConfig(existing, SKILL_RENAMES) : { config: defaultConfig() };
-    const config = { ...migrated, targets: [...new Set([...migrated.targets, platform])].sort() };
+    const { config: migrated } = existing ? migrateConfig(existing, SKILL_RENAMES) : { config: defaultConfig(platform) };
+    const config = { ...migrated, targets: [platform] };
     return applyPlan(ctx, `install ${platform}`, makePlan(ctx, loc, config, true));
 }
 export function apply(ctx) {

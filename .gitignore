@@ -2,5 +2,9 @@
 .cursor/
 releases/
 .claude/
-.github/instructions/session-memory.instructions.md
-.cursor/rules
+.github/
+.cursor/
+.gitattributes
+.agent/
+CLAUDE.md
+.mcp.json

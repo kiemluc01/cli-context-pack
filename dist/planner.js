@@ -41,6 +41,7 @@ export function buildPlan(input) {
         planLegacyRemoval(r, input, actions);
         delete newLock.skills[r.from];
     }
+    planDisabledTargets(input, actions);
     if (input.isGit) {
         planGitattributes(input, linkMode, actions);
         if (input.config.hooks.preCommit)
@@ -201,6 +202,61 @@ function planCopilotTarget(skill, input, actions) {
         return;
     }
     actions.push({ kind: "write", path: rel, content: Buffer.from(desired), executable: false, reason: existing === null ? "create" : "update", note: "generated from canonical skill" });
+}
+function planDisabledTargets(input, actions) {
+    const skills = input.skills;
+    if (!input.config.targets.includes("claude")) {
+        for (const skill of skills)
+            planRemovedLinkedTarget(skill, input, actions, claudeRoot);
+        planClaudeMdRemoval(input, actions);
+    }
+    if (!input.config.targets.includes("codex")) {
+        for (const skill of skills)
+            planRemovedLinkedTarget(skill, input, actions, codexRoot);
+    }
+    if (!input.config.targets.includes("copilot")) {
+        for (const skill of skills)
+            planRemovedCopilotTarget(skill, input, actions);
+    }
+}
+function planRemovedLinkedTarget(skill, input, actions, rootFor) {
+    const rel = rootFor(skill.name);
+    const abs = toAbs(input.root, rel);
+    const st = lstatOrNull(abs);
+    if (!st)
+        return;
+    if (st.isSymbolicLink()) {
+        const current = readlinkSync(abs);
+        if (path.resolve(path.dirname(abs), current) === toAbs(input.root, primaryRoot(skill.name)))
+            actions.push({ kind: "unlink", path: rel, note: "platform adapter disabled" });
+        return;
+    }
+    if (st.isDirectory() && isManagedCopy(abs, skill, input.lock.skills[skill.name]?.files ?? {}))
+        actions.push({ kind: "rmtree", path: rel, note: "platform adapter disabled" });
+}
+function planRemovedCopilotTarget(skill, input, actions) {
+    const rel = `.github/instructions/${skill.name}.instructions.md`;
+    const existing = readTextOrNull(toAbs(input.root, rel));
+    if (existing?.startsWith("<!-- managed-by: ctxpack; canonical source: .agent/skills/"))
+        actions.push({ kind: "delete", path: rel, reason: "platform adapter disabled" });
+}
+function planClaudeMdRemoval(input, actions) {
+    const existing = readTextOrNull(toAbs(input.root, CLAUDE_MD_PATH));
+    if (existing === null)
+        return;
+    const begin = existing.indexOf(MARK_BEGIN);
+    const end = existing.indexOf(MARK_END);
+    if (begin === -1 && end === -1)
+        return;
+    if (begin === -1 || end === -1 || end < begin) {
+        actions.push({ kind: "conflict", path: CLAUDE_MD_PATH, code: "CONFLICT", detail: "The ctxpack managed-block markers are damaged.", fix: `Repair ${CLAUDE_MD_PATH} before switching platforms.` });
+        return;
+    }
+    const next = `${existing.slice(0, begin)}${existing.slice(end + MARK_END.length)}`.replace(/^\n+|\n+$/g, "");
+    if (next === "")
+        actions.push({ kind: "delete", path: CLAUDE_MD_PATH, reason: "platform adapter disabled" });
+    else if (next !== existing)
+        actions.push({ kind: "write", path: CLAUDE_MD_PATH, content: Buffer.from(`${next}\n`), executable: false, reason: "update", note: "remove Claude adapter block" });
 }
 /** Expand-then-contract rename: the new skill is already planned; remove the old managed install. */
 function planLegacyRemoval(r, input, actions) {
